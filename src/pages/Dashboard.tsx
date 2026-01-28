@@ -1,7 +1,10 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { StatusCard } from '@/components/dashboard/StatusCard';
 import { JobsTable } from '@/components/dashboard/JobsTable';
-import { dummyJobs, statusCounts, JobStatus } from '@/data/dummyData';
+import { JobStatus } from '@/types';
+import { statusLabels } from '@/constants';
+import { API_URL } from '../config';
 import {
   Bell,
   FileText,
@@ -24,23 +27,54 @@ const statusCards: { status: JobStatus; icon: typeof Bell; variant: 'default' | 
   { status: 'delivered', icon: Truck, variant: 'success' },
 ];
 
-const statusLabels: Record<JobStatus, string> = {
-  'pre-alert': 'Pre-Alert Received',
-  'created': 'Job Created',
-  'docs-pending': 'Documents Pending',
-  'verification-pending': 'Verification Pending',
-  'approval-pending': 'Approval Pending',
-  'customs-submitted': 'Customs Submitted',
-  'cleared': 'Cleared',
-  'delivered': 'Delivered',
+
+
+// Helper to map backend data to frontend model
+const mapBackendJobToFrontend = (backendJob: any): any => {
+  return {
+    id: backendJob.id, // Use Database ID for routing (Integer)
+    jobNumber: backendJob.job_number, // Use Job Number string for display
+    importer: backendJob.importer,
+    port: 'Mundra', // Backend doesn't return port in list? It does in 'remarks'. Or defaults.
+    status: 'created', // Default status for now
+    eta: backendJob.eta || new Date().toISOString(),
+    needsAction: false,
+    pendingAction: 'None'
+  };
 };
 
 export default function Dashboard() {
   const [activeFilter, setActiveFilter] = useState<JobStatus | null>(null);
 
+  // Fetch Jobs from API
+  const { data: jobs = [], isLoading } = useQuery({
+    queryKey: ['jobs'],
+    queryFn: async () => {
+      try {
+        console.log("Fetching jobs for dashboard from:", `${API_URL}/api/jobs`);
+        const response = await fetch(`${API_URL}/api/jobs`);
+        if (!response.ok) throw new Error('Failed to fetch jobs');
+        const data = await response.json();
+
+        // Map backend jobs to frontend structure
+        return (data.jobs || []).map(mapBackendJobToFrontend);
+      } catch (error) {
+        console.error("Error fetching jobs for dashboard:", error);
+        return [];
+      }
+    }
+  });
+
+  // Dynamic Status Counts
+  const statusCounts = jobs.reduce((acc: Record<string, number>, job: any) => {
+    const status = job.status || 'created';
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
   const filteredJobs = activeFilter
-    ? dummyJobs.filter((job) => job.status === activeFilter)
-    : dummyJobs;
+    ? jobs.filter((job: any) => job.status === activeFilter)
+    : jobs;
 
   const handleCardClick = (status: JobStatus) => {
     setActiveFilter(activeFilter === status ? null : status);
@@ -59,7 +93,7 @@ export default function Dashboard() {
           <StatusCard
             key={status}
             title={statusLabels[status]}
-            count={statusCounts[status]}
+            count={statusCounts[status] || 0} // Use dynamic count
             icon={icon}
             variant={variant}
             isActive={activeFilter === status}
@@ -83,7 +117,11 @@ export default function Dashboard() {
             </button>
           )}
         </div>
-        <JobsTable jobs={filteredJobs} />
+        {isLoading ? (
+          <div className="flex justify-center p-8">Loading...</div>
+        ) : (
+          <JobsTable jobs={filteredJobs} />
+        )}
       </div>
     </div>
   );

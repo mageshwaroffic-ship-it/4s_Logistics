@@ -1,5 +1,8 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { dummyJobs, getStepIndex, statusLabels } from '@/data/dummyData';
+import { useQuery } from '@tanstack/react-query';
+import { Job } from '@/types';
+import { getStepIndex, statusLabels } from '@/constants';
+import { API_URL } from '../config';
 import { StatusTimeline } from '@/components/job/StatusTimeline';
 import { DocumentIntake } from '@/components/job/DocumentIntake';
 import { DocumentVerification } from '@/components/job/DocumentVerification';
@@ -14,14 +17,64 @@ import { Billing } from '@/components/job/Billing';
 import { JobClosure } from '@/components/job/JobClosure';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, ExternalLink, MoreVertical } from 'lucide-react';
+import { ArrowLeft, ExternalLink, MoreVertical, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function JobDetail() {
   const { jobId } = useParams();
   const navigate = useNavigate();
 
-  const job = dummyJobs.find((j) => j.id === jobId);
+  // Fetch API using ID
+  const { data: job, isLoading } = useQuery({
+    queryKey: ['job', jobId],
+    queryFn: async (): Promise<Job> => {
+      if (!jobId) throw new Error("No Job ID");
+      const response = await fetch(`${API_URL}/api/jobs/${jobId}`);
+      if (!response.ok) {
+        throw new Error('Job not found');
+      }
+      const backendJob = await response.json();
+
+      // Map to frontend model (duplicates logic from JobList, ideally share this)
+      let port = 'Unknown';
+      let container = 'TBD';
+      if (backendJob.remarks) {
+        const portMatch = backendJob.remarks.match(/Port: ([^,]+)/);
+        if (portMatch) port = portMatch[1].trim();
+        const containerMatch = backendJob.remarks.match(/Container: ([^,]+)/);
+        if (containerMatch) container = containerMatch[1].trim();
+      }
+      let status: any = 'created';
+      if (backendJob.cleared_date) status = 'cleared';
+      else if (backendJob.bill_of_entry) status = 'customs-submitted';
+      else if (backendJob.status) status = backendJob.status; // If available
+
+      return {
+        id: backendJob.id,
+        jobNumber: backendJob.job_number,
+        importer: backendJob.importer,
+        port: port !== 'Unknown' ? port : 'Mundra',
+        status: status,
+        eta: backendJob.eta || new Date().toISOString(),
+        pendingAction: 'View Details',
+        needsAction: false,
+        containerNumber: container,
+        blNumber: backendJob.bl_number || 'TBD',
+        origin: 'Unknown',
+        destination: port !== 'Unknown' ? port : 'Mundra',
+        dutyAmount: 0,
+        invoiceAmount: 0,
+        documents: backendJob.documents || [],
+        checklistItems: [],
+        entryDetails: backendJob.entryDetails || {}
+      };
+    },
+    enabled: !!jobId
+  });
+
+  if (isLoading) {
+    return <div className="flex h-screen items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  }
 
   if (!job) {
     return (
@@ -34,7 +87,7 @@ export default function JobDetail() {
   }
 
   const currentStep = getStepIndex(job.status);
-  const hasMissingDocs = job.documents.some((d) => d.status === 'missing');
+  const hasMissingDocs = false; // Always false for now as we don't have logic, or pass logic
 
   return (
     <div className="space-y-6">
@@ -46,15 +99,15 @@ export default function JobDetail() {
           </Button>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">{job.id}</h1>
+              <h1 className="text-2xl font-bold">{job.jobNumber || job.id}</h1>
               <Badge
                 className={cn(
                   'status-badge',
                   job.status === 'cleared' || job.status === 'delivered'
                     ? 'status-cleared'
                     : job.status === 'customs-submitted'
-                    ? 'status-submitted'
-                    : 'status-pending'
+                      ? 'status-submitted'
+                      : 'status-pending'
                 )}
               >
                 {statusLabels[job.status]}
@@ -106,14 +159,14 @@ export default function JobDetail() {
         {/* Document Intake */}
         <DocumentIntake documents={job.documents} />
 
-        {/* Missing Documents */}
-        {hasMissingDocs && <MissingDocuments />}
+        {/* Missing Documents - Pass Empty List for now */}
+        {hasMissingDocs && <MissingDocuments items={[]} />}
 
-        {/* Document Verification */}
-        <DocumentVerification />
+        {/* Document Verification - Pass Empty Fields */}
+        <DocumentVerification fields={{}} />
 
         {/* Entry Form */}
-        <EntryScreen />
+        <EntryScreen data={job.entryDetails} />
 
         {/* Checklist */}
         {job.checklistItems.length > 0 && <Checklist items={job.checklistItems} />}

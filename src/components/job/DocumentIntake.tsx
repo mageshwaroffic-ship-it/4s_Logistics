@@ -1,4 +1,4 @@
-import { Document } from '@/data/dummyData';
+import { Document } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Upload, FileText, Check, X, AlertCircle } from 'lucide-react';
@@ -43,13 +43,13 @@ export function DocumentIntake({ documents }: DocumentIntakeProps) {
               <div className="flex items-center gap-3">
                 <div className={cn(
                   'w-10 h-10 rounded-lg flex items-center justify-center',
-                  doc.status === 'uploaded' ? 'bg-muted' : 
-                  doc.status === 'missing' ? 'bg-orange-100' : 'bg-red-100'
+                  doc.status === 'uploaded' ? 'bg-muted' :
+                    doc.status === 'missing' ? 'bg-orange-100' : 'bg-red-100'
                 )}>
                   <FileText className={cn(
                     'w-5 h-5',
                     doc.status === 'uploaded' ? 'text-muted-foreground' :
-                    doc.status === 'missing' ? 'text-orange-600' : 'text-red-600'
+                      doc.status === 'missing' ? 'text-orange-600' : 'text-red-600'
                   )} />
                 </div>
                 <div>

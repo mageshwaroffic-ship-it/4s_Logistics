@@ -1,6 +1,6 @@
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { timelineSteps } from '@/data/dummyData';
+import { timelineSteps } from '@/constants';
 
 interface StatusTimelineProps {
   currentStep: number;

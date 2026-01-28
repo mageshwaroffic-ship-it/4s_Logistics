@@ -1,21 +1,30 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { missingDocuments } from '@/data/dummyData';
 import { Upload, AlertCircle } from 'lucide-react';
 
-export function MissingDocuments() {
+interface MissingDocumentItem {
+  id: string;
+  name: string;
+  required: boolean;
+}
+
+interface MissingDocumentsProps {
+  items?: MissingDocumentItem[];
+}
+
+export function MissingDocuments({ items = [] }: MissingDocumentsProps) {
   return (
     <div className="section-card border-warning/50 bg-amber-50/50">
       <div className="flex items-center gap-2 mb-4">
         <AlertCircle className="w-5 h-5 text-warning" />
         <h3 className="text-lg font-semibold">Missing Documents</h3>
         <Badge className="status-badge status-missing ml-auto">
-          {missingDocuments.length} Required
+          {items.length} Required
         </Badge>
       </div>
 
       <div className="space-y-3">
-        {missingDocuments.map((doc) => (
+        {items.map((doc) => (
           <div
             key={doc.id}
             className="flex items-center justify-between p-3 rounded-lg bg-card border"

@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { Job, statusLabels, JobStatus } from '@/data/dummyData';
+import { Job, JobStatus } from '@/types';
+import { statusLabels } from '@/constants';
 import { cn } from '@/lib/utils';
 import { AlertTriangle, ChevronRight } from 'lucide-react';
 import {
@@ -46,39 +47,47 @@ export function JobsTable({ jobs, showNeedsAction = true }: JobsTableProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {jobs.map((job) => (
-            <TableRow
-              key={job.id}
-              onClick={() => navigate(`/jobs/${job.id}`)}
-              className={cn(
-                'cursor-pointer hover:bg-muted/50 transition-colors',
-                showNeedsAction && job.needsAction && 'table-row-highlight'
-              )}
-            >
-              <TableCell className="font-medium">{job.id}</TableCell>
-              <TableCell>{job.importer}</TableCell>
-              <TableCell>{job.port}</TableCell>
-              <TableCell>
-                <Badge variant="secondary" className={cn('status-badge', statusStyles[job.status])}>
-                  {statusLabels[job.status]}
-                </Badge>
-              </TableCell>
-              <TableCell>{new Date(job.eta).toLocaleDateString()}</TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  {job.needsAction && (
-                    <AlertTriangle className="w-4 h-4 text-warning" />
-                  )}
-                  <span className={cn(job.needsAction && 'font-medium')}>
-                    {job.pendingAction}
-                  </span>
-                </div>
-              </TableCell>
-              <TableCell>
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+          {jobs.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                No jobs found.
               </TableCell>
             </TableRow>
-          ))}
+          ) : (
+            jobs.map((job) => (
+              <TableRow
+                key={job.id}
+                onClick={() => navigate(`/jobs/${job.id}`)}
+                className={cn(
+                  'cursor-pointer hover:bg-muted/50 transition-colors',
+                  showNeedsAction && job.needsAction && 'table-row-highlight'
+                )}
+              >
+                <TableCell className="font-medium">{job.jobNumber || job.id}</TableCell>
+                <TableCell>{job.importer}</TableCell>
+                <TableCell>{job.port}</TableCell>
+                <TableCell>
+                  <Badge variant="secondary" className={cn('status-badge', statusStyles[job.status])}>
+                    {statusLabels[job.status]}
+                  </Badge>
+                </TableCell>
+                <TableCell>{new Date(job.eta).toLocaleDateString()}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    {job.needsAction && (
+                      <AlertTriangle className="w-4 h-4 text-warning" />
+                    )}
+                    <span className={cn(job.needsAction && 'font-medium')}>
+                      {job.pendingAction}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                </TableCell>
+              </TableRow>
+            ))
+          )}
         </TableBody>
       </Table>
     </div>

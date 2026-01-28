@@ -1,21 +1,26 @@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { extractedFields } from '@/data/dummyData';
 import { FileText, AlertTriangle, Check, X, RotateCcw } from 'lucide-react';
 
-export function DocumentVerification() {
-  const fields = [
-    { label: 'Invoice Number', value: extractedFields.invoiceNumber, match: true },
-    { label: 'Invoice Date', value: extractedFields.invoiceDate, match: true },
-    { label: 'Shipper', value: extractedFields.shipper, match: true },
-    { label: 'Consignee', value: extractedFields.consignee, match: true },
-    { label: 'Description', value: extractedFields.description, match: true },
-    { label: 'Quantity', value: extractedFields.quantity, match: true },
-    { label: 'Unit Price', value: extractedFields.unitPrice, match: false },
-    { label: 'Total Value', value: extractedFields.totalValue, match: true },
-    { label: 'HS Code', value: extractedFields.hsCode, match: false },
-    { label: 'Country of Origin', value: extractedFields.countryOfOrigin, match: true },
+interface DocumentVerificationProps {
+  fields?: any;
+}
+
+export function DocumentVerification({ fields = {} }: DocumentVerificationProps) {
+  const fieldList = [
+    { label: 'Invoice Number', value: fields.invoiceNumber || '-', match: !!fields.invoiceNumber },
+    { label: 'Invoice Date', value: fields.invoiceDate || '-', match: !!fields.invoiceDate },
+    { label: 'Shipper', value: fields.shipper || '-', match: !!fields.shipper },
+    { label: 'Consignee', value: fields.consignee || '-', match: !!fields.consignee },
+    { label: 'Description', value: fields.description || '-', match: !!fields.description },
+    { label: 'Quantity', value: fields.quantity || '-', match: !!fields.quantity },
+    { label: 'Unit Price', value: fields.unitPrice || '-', match: false },
+    { label: 'Total Value', value: fields.totalValue || '-', match: !!fields.totalValue },
+    { label: 'HS Code', value: fields.hsCode || '-', match: false },
+    { label: 'Country of Origin', value: fields.countryOfOrigin || '-', match: !!fields.countryOfOrigin },
   ];
+
+  const mismatchCount = fieldList.filter(f => !f.match).length;
 
   return (
     <div className="section-card">
@@ -23,7 +28,7 @@ export function DocumentVerification() {
         <h3 className="text-lg font-semibold">Document Verification</h3>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <AlertTriangle className="w-4 h-4 text-warning" />
-          2 mismatches found
+          {mismatchCount} mismatches found
         </div>
       </div>
 
@@ -39,7 +44,7 @@ export function DocumentVerification() {
             <div className="text-center text-muted-foreground">
               <FileText className="w-16 h-16 mx-auto mb-2 opacity-50" />
               <p>Document Preview</p>
-              <p className="text-xs">INV-2024-88291.pdf</p>
+              <p className="text-xs">Select a document</p>
             </div>
           </div>
         </div>
@@ -48,12 +53,11 @@ export function DocumentVerification() {
         <div>
           <h4 className="font-medium mb-4">Extracted Fields</h4>
           <div className="space-y-3">
-            {fields.map((field, index) => (
+            {fieldList.map((field, index) => (
               <div
                 key={index}
-                className={`flex items-center justify-between p-3 rounded-lg border ${
-                  !field.match ? 'bg-amber-50 border-amber-200' : 'bg-card'
-                }`}
+                className={`flex items-center justify-between p-3 rounded-lg border ${!field.match ? 'bg-amber-50 border-amber-200' : 'bg-card'
+                  }`}
               >
                 <div>
                   <p className="text-sm text-muted-foreground">{field.label}</p>
