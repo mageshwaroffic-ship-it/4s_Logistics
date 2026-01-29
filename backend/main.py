@@ -30,6 +30,7 @@ from routes.alert import router as alert_router
 from routes.transport import router as transport_router
 from routes.activity_log import router as activity_log_router
 from routes.auth import router as auth_router
+from routes.upload import router as upload_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -66,6 +67,7 @@ app.include_router(alert_router, prefix="/api", tags=["Alerts"])
 app.include_router(transport_router, prefix="/api", tags=["Transport"])
 app.include_router(activity_log_router, prefix="/api", tags=["Activity Logs"])
 app.include_router(auth_router, prefix="/api", tags=["Authentication"])
+app.include_router(upload_router, prefix="/api", tags=["File Upload"])
 
 
 # ============================================================

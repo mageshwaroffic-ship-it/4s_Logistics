@@ -17,6 +17,14 @@ router = APIRouter()
 class NewJobCreate(BaseModel):
     tenant_id: int = Field(..., description="Tenant ID")
     job_no: str = Field(..., description="Job number (unique per tenant)")
+    customer_id: Optional[int] = None
+    bl_file_path: Optional[str] = None  # Path to Bill of Lading file
+    packing_list_path: Optional[str] = None  # Path to Packing List file
+    incoterm: Optional[str] = None  # Detected INCOTERM (DAP, CIF, FOB, etc.)
+    invoice_path: Optional[str] = None  # Path to Invoice file
+    freight_payment_path: Optional[str] = None  # Path to Freight Payment (Arrival Notice / Certificate)
+    misc_charges_amount: Optional[float] = None  # Extracted misc charges from invoice
+    # Optional fields (kept for backward compatibility)
     bl_no: Optional[str] = None
     shipping_line: Optional[str] = None
     vessel_name: Optional[str] = None
@@ -24,7 +32,6 @@ class NewJobCreate(BaseModel):
     pol: Optional[str] = None  # Port of Loading
     pod: Optional[str] = None  # Port of Discharge
     eta: Optional[str] = None
-    customer_id: Optional[int] = None
 
 
 class NewJobUpdate(BaseModel):
@@ -53,7 +60,9 @@ def get_all_new_jobs(tenant_id: Optional[int] = None, status: Optional[str] = No
         query = """
             SELECT j.id, j.tenant_id, j.job_no, j.bl_no, j.shipping_line, j.vessel_name, 
                    j.voyage_no, j.pol, j.pod, j.eta, j.ata, j.status, j.customer_id, 
-                   j.created_at, c.company_name as customer_name
+                   j.created_at, j.bl_file_path, j.packing_list_path, j.incoterm,
+                   j.invoice_path, j.freight_payment_path, j.misc_charges_amount,
+                   c.company_name as customer_name
             FROM jobs j
             LEFT JOIN customers c ON j.customer_id = c.id
             WHERE 1=1
@@ -74,7 +83,8 @@ def get_all_new_jobs(tenant_id: Optional[int] = None, status: Optional[str] = No
         jobs = []
         columns = ['id', 'tenant_id', 'job_no', 'bl_no', 'shipping_line', 'vessel_name', 
                    'voyage_no', 'pol', 'pod', 'eta', 'ata', 'status', 'customer_id', 
-                   'created_at', 'customer_name']
+                   'created_at', 'bl_file_path', 'packing_list_path', 'incoterm',
+                   'invoice_path', 'freight_payment_path', 'misc_charges_amount', 'customer_name']
         
         for row in cursor.fetchall():
             job = dict(zip(columns, row))
@@ -108,12 +118,14 @@ def create_new_job(job: NewJobCreate):
                 pass
         
         cursor.execute("""
-            INSERT INTO jobs (tenant_id, job_no, bl_no, shipping_line, vessel_name, 
-                              voyage_no, pol, pod, eta, customer_id) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
+            INSERT INTO jobs (tenant_id, job_no, customer_id, bl_file_path, packing_list_path,
+                              incoterm, invoice_path, freight_payment_path, misc_charges_amount,
+                              bl_no, shipping_line, vessel_name, voyage_no, pol, pod, eta) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
             RETURNING id, job_no, status, created_at
-        """, (job.tenant_id, job.job_no, job.bl_no, job.shipping_line, job.vessel_name,
-              job.voyage_no, job.pol, job.pod, eta_date, job.customer_id))
+        """, (job.tenant_id, job.job_no, job.customer_id, job.bl_file_path, job.packing_list_path,
+              job.incoterm, job.invoice_path, job.freight_payment_path, job.misc_charges_amount,
+              job.bl_no, job.shipping_line, job.vessel_name, job.voyage_no, job.pol, job.pod, eta_date))
         
         row = cursor.fetchone()
         conn.commit()

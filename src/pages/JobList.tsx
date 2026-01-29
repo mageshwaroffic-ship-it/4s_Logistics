@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,7 +36,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Search, Plus, Filter, Download, Loader2, MoreHorizontal, Eye, Pencil, Trash2, Ship, FileBox } from 'lucide-react';
+import {
+  Search, Plus, Filter, Download, Loader2, MoreHorizontal, Eye, Trash2,
+  FileBox, Upload, FileText, X, Check, AlertCircle, Package
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 const API_URL = "http://localhost:8000/api";
@@ -45,23 +48,30 @@ interface Job {
   id: number;
   tenant_id: number;
   job_no: string;
-  bl_no: string | null;
-  shipping_line: string | null;
-  vessel_name: string | null;
-  voyage_no: string | null;
-  pol: string | null;
-  pod: string | null;
-  eta: string | null;
-  ata: string | null;
-  status: string;
   customer_id: number | null;
   customer_name: string | null;
+  bl_file_path: string | null;
+  packing_list_path: string | null;
+  incoterm: string | null;
+  invoice_path: string | null;
+  freight_payment_path: string | null;
+  misc_charges_amount: number | null;
+  status: string;
   created_at: string;
 }
 
 interface Customer {
   id: number;
   company_name: string;
+}
+
+interface IncotermResult {
+  detected: boolean;
+  term: string | null;
+  category: string | null;
+  required_docs: string[];
+  needs_freight: boolean;
+  extract_misc: boolean;
 }
 
 const statusColors: Record<string, string> = {
@@ -94,17 +104,36 @@ export default function JobList() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [deletingJob, setDeletingJob] = useState<Job | null>(null);
 
-  // New job form
+  // File upload refs
+  const blFileRef = useRef<HTMLInputElement>(null);
+  const plFileRef = useRef<HTMLInputElement>(null);
+  const invoiceFileRef = useRef<HTMLInputElement>(null);
+  const freightFileRef = useRef<HTMLInputElement>(null);
+
+  // Form state
   const [newJob, setNewJob] = useState({
     job_no: '',
     customer_id: '',
-    bl_no: '',
-    shipping_line: '',
-    vessel_name: '',
-    pol: '',
-    pod: '',
-    eta: '',
+    // Files
+    bl_file: null as File | null,
+    bl_file_path: '',
+    pl_file: null as File | null,
+    packing_list_path: '',
+    invoice_file: null as File | null,
+    invoice_path: '',
+    freight_file: null as File | null,
+    freight_payment_path: '',
+    // Extracted data
+    incoterm: '',
+    misc_charges_amount: 0,
   });
+
+  // INCOTERM detection state
+  const [incotermResult, setIncotermResult] = useState<IncotermResult | null>(null);
+  const [uploadingBL, setUploadingBL] = useState(false);
+  const [uploadingPL, setUploadingPL] = useState(false);
+  const [uploadingInvoice, setUploadingInvoice] = useState(false);
+  const [uploadingFreight, setUploadingFreight] = useState(false);
 
   // Get tenant_id from localStorage
   const getTenantId = () => {
@@ -173,18 +202,212 @@ export default function JobList() {
     const matchesSearch =
       job.job_no.toLowerCase().includes(searchQuery.toLowerCase()) ||
       job.customer_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      job.bl_no?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      job.pod?.toLowerCase().includes(searchQuery.toLowerCase());
+      job.incoterm?.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesStatus = statusFilter === 'all' || job.status === statusFilter;
 
     return matchesSearch && matchesStatus;
   });
 
+  // Upload file helper
+  const uploadFile = async (file: File, docType: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('doc_type', docType);
+    formData.append('job_no', newJob.job_no || 'temp');
+
+    const response = await fetch(`${API_URL}/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return await response.json();
+  };
+
+  // Handle BL file selection
+  const handleBLFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingBL(true);
+    try {
+      const result = await uploadFile(file, 'bl');
+      setNewJob({
+        ...newJob,
+        bl_file: file,
+        bl_file_path: result.file_path,
+      });
+      toast.success(`Bill of Lading uploaded`);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to upload Bill of Lading");
+    } finally {
+      setUploadingBL(false);
+    }
+  };
+
+  // Handle PL file selection - extracts INCOTERM
+  const handlePLFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingPL(true);
+    try {
+      const result = await uploadFile(file, 'packing_list');
+
+      // Check if INCOTERM was detected
+      if (result.incoterm) {
+        setIncotermResult(result.incoterm);
+        if (result.incoterm.detected && result.incoterm.term) {
+          setNewJob({
+            ...newJob,
+            pl_file: file,
+            packing_list_path: result.file_path,
+            incoterm: result.incoterm.term,
+          });
+          toast.success(`Packing List uploaded. Detected INCOTERM: ${result.incoterm.term}`);
+        } else {
+          setNewJob({
+            ...newJob,
+            pl_file: file,
+            packing_list_path: result.file_path,
+          });
+          toast.info("Packing List uploaded. INCOTERM not detected - please select manually.");
+        }
+      } else {
+        setNewJob({
+          ...newJob,
+          pl_file: file,
+          packing_list_path: result.file_path,
+        });
+        toast.success(`Packing List uploaded`);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to upload Packing List");
+    } finally {
+      setUploadingPL(false);
+    }
+  };
+
+  // Handle Invoice file selection
+  const handleInvoiceFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingInvoice(true);
+    try {
+      // Use extract endpoint if misc charges needed
+      const extractMisc = incotermResult?.extract_misc ||
+        ['CFR', 'C&F', 'CNF', 'FOB', 'EXW', 'FCA'].includes(newJob.incoterm);
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('job_no', newJob.job_no || 'temp');
+      formData.append('extract_misc', extractMisc.toString());
+
+      const response = await fetch(`${API_URL}/upload/extract-invoice`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Upload failed');
+
+      const result = await response.json();
+      setNewJob({
+        ...newJob,
+        invoice_file: file,
+        invoice_path: result.file_path,
+        misc_charges_amount: result.misc_charges || 0,
+      });
+
+      if (result.misc_charges > 0) {
+        toast.success(`Invoice uploaded. Misc charges: ₹${result.misc_charges.toLocaleString()}`);
+      } else {
+        toast.success(`Invoice uploaded`);
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to upload Invoice");
+    } finally {
+      setUploadingInvoice(false);
+    }
+  };
+
+  // Handle Freight file selection
+  const handleFreightFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingFreight(true);
+    try {
+      const result = await uploadFile(file, 'freight');
+      setNewJob({
+        ...newJob,
+        freight_file: file,
+        freight_payment_path: result.file_path,
+      });
+      toast.success(`Freight Payment document uploaded`);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to upload Freight Payment");
+    } finally {
+      setUploadingFreight(false);
+    }
+  };
+
+  // Check if freight is required based on INCOTERM
+  const needsFreightPayment = () => {
+    const freightTerms = ['FOB', 'EXW', 'FCA'];
+    return freightTerms.includes(newJob.incoterm) ||
+      (incotermResult?.needs_freight === true);
+  };
+
+  // Reset form
+  const resetForm = () => {
+    setNewJob({
+      job_no: '',
+      customer_id: '',
+      bl_file: null,
+      bl_file_path: '',
+      pl_file: null,
+      packing_list_path: '',
+      invoice_file: null,
+      invoice_path: '',
+      freight_file: null,
+      freight_payment_path: '',
+      incoterm: '',
+      misc_charges_amount: 0,
+    });
+    setIncotermResult(null);
+    if (blFileRef.current) blFileRef.current.value = '';
+    if (plFileRef.current) plFileRef.current.value = '';
+    if (invoiceFileRef.current) invoiceFileRef.current.value = '';
+    if (freightFileRef.current) freightFileRef.current.value = '';
+  };
+
   // Create job
   const handleCreateJob = async () => {
-    if (!newJob.customer_id || !newJob.pod || !newJob.eta) {
-      toast.error("Please fill in required fields: Customer, Port, ETA");
+    // Validation
+    if (!newJob.customer_id) {
+      toast.error("Please select a customer");
+      return;
+    }
+    if (!newJob.bl_file_path) {
+      toast.error("Bill of Lading is required");
+      return;
+    }
+    if (!newJob.packing_list_path) {
+      toast.error("Packing List is required");
+      return;
+    }
+    if (!newJob.invoice_path) {
+      toast.error("Invoice is required");
+      return;
+    }
+    if (needsFreightPayment() && !newJob.freight_payment_path) {
+      toast.error("Freight Payment (Arrival Notice / Certificate) is required for FOB/EXW/FCA");
       return;
     }
 
@@ -200,12 +423,12 @@ export default function JobList() {
           tenant_id: tenantId,
           job_no: jobNo,
           customer_id: parseInt(newJob.customer_id),
-          bl_no: newJob.bl_no || null,
-          shipping_line: newJob.shipping_line || null,
-          vessel_name: newJob.vessel_name || null,
-          pol: newJob.pol || null,
-          pod: newJob.pod,
-          eta: newJob.eta,
+          bl_file_path: newJob.bl_file_path,
+          packing_list_path: newJob.packing_list_path,
+          incoterm: newJob.incoterm || null,
+          invoice_path: newJob.invoice_path,
+          freight_payment_path: newJob.freight_payment_path || null,
+          misc_charges_amount: newJob.misc_charges_amount || null,
         }),
       });
 
@@ -217,16 +440,7 @@ export default function JobList() {
       const data = await response.json();
       toast.success(`Job ${data.job_no} created successfully!`);
 
-      setNewJob({
-        job_no: '',
-        customer_id: '',
-        bl_no: '',
-        shipping_line: '',
-        vessel_name: '',
-        pol: '',
-        pod: '',
-        eta: '',
-      });
+      resetForm();
       setIsDialogOpen(false);
       fetchJobs();
     } catch (error: any) {
@@ -256,6 +470,63 @@ export default function JobList() {
     }
   };
 
+  // File upload component
+  const FileUploadButton = ({
+    label,
+    file,
+    onSelect,
+    onClear,
+    inputRef,
+    uploading,
+    required = false,
+    accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+  }: {
+    label: string;
+    file: File | null;
+    onSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onClear: () => void;
+    inputRef: React.RefObject<HTMLInputElement>;
+    uploading: boolean;
+    required?: boolean;
+    accept?: string;
+  }) => (
+    <div className="space-y-2">
+      <Label>{label} {required && <span className="text-red-500">*</span>}</Label>
+      <div className="flex items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept={accept}
+          onChange={onSelect}
+          className="hidden"
+        />
+        {file ? (
+          <div className="flex-1 flex items-center gap-2 p-3 border rounded-lg bg-green-50 border-green-200">
+            <FileText className="h-5 w-5 text-green-600" />
+            <span className="flex-1 text-sm truncate">{file.name}</span>
+            <Button variant="ghost" size="icon" onClick={onClear}>
+              <X className="h-4 w-4 text-gray-500" />
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            className="flex-1"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+          >
+            {uploading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4 mr-2" />
+            )}
+            {uploading ? 'Uploading...' : `Upload ${label}`}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -268,7 +539,8 @@ export default function JobList() {
           <p className="text-gray-500 mt-1">Manage all import jobs</p>
         </div>
         <Button onClick={() => {
-          setNewJob({ ...newJob, job_no: generateJobNo() });
+          resetForm();
+          setNewJob(prev => ({ ...prev, job_no: generateJobNo() }));
           setIsDialogOpen(true);
         }} className="bg-blue-600 hover:bg-blue-700">
           <Plus className="w-4 h-4 mr-2" />
@@ -277,12 +549,20 @@ export default function JobList() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="text-center">
               <p className="text-2xl font-bold text-blue-600">{jobs.length}</p>
               <p className="text-sm text-gray-500">Total Jobs</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-4">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-amber-600">{jobs.filter(j => j.status === 'created').length}</p>
+              <p className="text-sm text-gray-500">New</p>
             </div>
           </CardContent>
         </Card>
@@ -297,24 +577,8 @@ export default function JobList() {
         <Card>
           <CardContent className="pt-4 pb-4">
             <div className="text-center">
-              <p className="text-2xl font-bold text-amber-600">{jobs.filter(j => j.status === 'arrived').length}</p>
-              <p className="text-sm text-gray-500">Arrived</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="text-center">
               <p className="text-2xl font-bold text-green-600">{jobs.filter(j => j.status === 'cleared').length}</p>
               <p className="text-sm text-gray-500">Cleared</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="text-center">
-              <p className="text-2xl font-bold text-emerald-600">{jobs.filter(j => j.status === 'delivered').length}</p>
-              <p className="text-sm text-gray-500">Delivered</p>
             </div>
           </CardContent>
         </Card>
@@ -325,7 +589,7 @@ export default function JobList() {
         <div className="relative w-full sm:w-[350px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input
-            placeholder="Search by Job No, Customer, B/L, Port..."
+            placeholder="Search by Job No, Customer, INCOTERM..."
             className="pl-10"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -371,10 +635,10 @@ export default function JobList() {
                 <TableRow>
                   <TableHead>Job No</TableHead>
                   <TableHead>Customer</TableHead>
-                  <TableHead>B/L Number</TableHead>
-                  <TableHead>Port (POD)</TableHead>
-                  <TableHead>ETA</TableHead>
+                  <TableHead>INCOTERM</TableHead>
+                  <TableHead>Documents</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Created</TableHead>
                   <TableHead className="w-16"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -383,14 +647,27 @@ export default function JobList() {
                   <TableRow key={job.id} className="cursor-pointer hover:bg-gray-50" onClick={() => navigate(`/jobs/${job.id}`)}>
                     <TableCell className="font-medium text-blue-600">{job.job_no}</TableCell>
                     <TableCell>{job.customer_name || '-'}</TableCell>
-                    <TableCell>{job.bl_no || '-'}</TableCell>
-                    <TableCell>{job.pod || '-'}</TableCell>
-                    <TableCell>{job.eta ? new Date(job.eta).toLocaleDateString() : '-'}</TableCell>
+                    <TableCell>
+                      {job.incoterm ? (
+                        <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs font-medium">
+                          {job.incoterm}
+                        </span>
+                      ) : '-'}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        {job.bl_file_path && <span className="text-green-600 text-xs">BL</span>}
+                        {job.packing_list_path && <span className="text-green-600 text-xs">PL</span>}
+                        {job.invoice_path && <span className="text-green-600 text-xs">INV</span>}
+                        {job.freight_payment_path && <span className="text-green-600 text-xs">FRT</span>}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[job.status] || 'bg-gray-100 text-gray-800'}`}>
                         {statusLabels[job.status] || job.status}
                       </span>
                     </TableCell>
+                    <TableCell>{job.created_at ? new Date(job.created_at).toLocaleDateString() : '-'}</TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -426,30 +703,33 @@ export default function JobList() {
 
       {/* Create Job Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[550px]">
+        <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create New Job</DialogTitle>
             <DialogDescription>
-              Enter the details for the new import job.
+              Upload required documents. Additional documents may be required based on INCOTERM detected from Packing List.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Job No</Label>
+
+          <div className="grid gap-5 py-4">
+            {/* Job No */}
+            <div className="space-y-2">
+              <Label>Job No</Label>
               <Input
-                className="col-span-3"
                 value={newJob.job_no}
                 onChange={(e) => setNewJob({ ...newJob, job_no: e.target.value })}
                 placeholder="Auto-generated if empty"
               />
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Customer *</Label>
+
+            {/* Customer */}
+            <div className="space-y-2">
+              <Label>Customer <span className="text-red-500">*</span></Label>
               <Select
                 value={newJob.customer_id}
                 onValueChange={(value) => setNewJob({ ...newJob, customer_id: value })}
               >
-                <SelectTrigger className="col-span-3">
+                <SelectTrigger>
                   <SelectValue placeholder="Select customer" />
                 </SelectTrigger>
                 <SelectContent>
@@ -461,78 +741,128 @@ export default function JobList() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">B/L Number</Label>
-              <Input
-                className="col-span-3"
-                value={newJob.bl_no}
-                onChange={(e) => setNewJob({ ...newJob, bl_no: e.target.value })}
-                placeholder="e.g., MAEU123456789"
-              />
+
+            <hr className="my-2" />
+
+            {/* Mandatory Documents */}
+            <div className="space-y-1">
+              <h4 className="font-medium text-sm text-gray-700">Required Documents</h4>
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Shipping Line</Label>
-              <Input
-                className="col-span-3"
-                value={newJob.shipping_line}
-                onChange={(e) => setNewJob({ ...newJob, shipping_line: e.target.value })}
-                placeholder="e.g., Maersk, MSC, CMA CGM"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Vessel Name</Label>
-              <Input
-                className="col-span-3"
-                value={newJob.vessel_name}
-                onChange={(e) => setNewJob({ ...newJob, vessel_name: e.target.value })}
-                placeholder="e.g., MSC Anna"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Port of Loading</Label>
-              <Input
-                className="col-span-3"
-                value={newJob.pol}
-                onChange={(e) => setNewJob({ ...newJob, pol: e.target.value })}
-                placeholder="e.g., Shanghai, China"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">Port (POD) *</Label>
-              <Select
-                value={newJob.pod}
-                onValueChange={(value) => setNewJob({ ...newJob, pod: value })}
-              >
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Select port of discharge" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Mundra">Mundra</SelectItem>
-                  <SelectItem value="Nhava Sheva">Nhava Sheva (JNPT)</SelectItem>
-                  <SelectItem value="Chennai">Chennai</SelectItem>
-                  <SelectItem value="Kolkata">Kolkata</SelectItem>
-                  <SelectItem value="Tuticorin">Tuticorin</SelectItem>
-                  <SelectItem value="Cochin">Cochin</SelectItem>
-                  <SelectItem value="Mumbai Air">Mumbai Air Cargo</SelectItem>
-                  <SelectItem value="Delhi Air">Delhi Air Cargo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label className="text-right">ETA *</Label>
-              <Input
-                type="date"
-                className="col-span-3"
-                value={newJob.eta}
-                onChange={(e) => setNewJob({ ...newJob, eta: e.target.value })}
-              />
-            </div>
+
+            {/* Bill of Lading */}
+            <FileUploadButton
+              label="Bill of Lading"
+              file={newJob.bl_file}
+              onSelect={handleBLFileSelect}
+              onClear={() => {
+                setNewJob({ ...newJob, bl_file: null, bl_file_path: '' });
+                if (blFileRef.current) blFileRef.current.value = '';
+              }}
+              inputRef={blFileRef}
+              uploading={uploadingBL}
+              required
+            />
+
+            {/* Packing List */}
+            <FileUploadButton
+              label="Packing List"
+              file={newJob.pl_file}
+              onSelect={handlePLFileSelect}
+              onClear={() => {
+                setNewJob({ ...newJob, pl_file: null, packing_list_path: '', incoterm: '' });
+                setIncotermResult(null);
+                if (plFileRef.current) plFileRef.current.value = '';
+              }}
+              inputRef={plFileRef}
+              uploading={uploadingPL}
+              required
+            />
+
+            {/* INCOTERM Display/Select */}
+            {newJob.packing_list_path && (
+              <div className="space-y-2">
+                <Label>INCOTERM</Label>
+                {incotermResult?.detected ? (
+                  <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <Package className="h-5 w-5 text-blue-600" />
+                    <span className="font-medium text-blue-700">{incotermResult.term}</span>
+                    <span className="text-sm text-gray-500">- Detected from Packing List</span>
+                  </div>
+                ) : (
+                  <Select
+                    value={newJob.incoterm}
+                    onValueChange={(value) => setNewJob({ ...newJob, incoterm: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select INCOTERM (not detected)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="DAP">DAP - Delivered at Place</SelectItem>
+                      <SelectItem value="CIF">CIF - Cost Insurance Freight</SelectItem>
+                      <SelectItem value="CFR">CFR / C&F - Cost and Freight</SelectItem>
+                      <SelectItem value="FOB">FOB - Free on Board</SelectItem>
+                      <SelectItem value="EXW">EXW - Ex Works</SelectItem>
+                      <SelectItem value="FCA">FCA - Free Carrier</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
+
+            {/* Invoice */}
+            <FileUploadButton
+              label="Invoice"
+              file={newJob.invoice_file}
+              onSelect={handleInvoiceFileSelect}
+              onClear={() => {
+                setNewJob({ ...newJob, invoice_file: null, invoice_path: '', misc_charges_amount: 0 });
+                if (invoiceFileRef.current) invoiceFileRef.current.value = '';
+              }}
+              inputRef={invoiceFileRef}
+              uploading={uploadingInvoice}
+              required
+            />
+
+            {/* Show misc charges if extracted */}
+            {newJob.misc_charges_amount > 0 && (
+              <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <AlertCircle className="h-5 w-5 text-amber-600" />
+                <span className="text-sm">Misc Charges: <strong>₹{newJob.misc_charges_amount.toLocaleString()}</strong></span>
+              </div>
+            )}
+
+            {/* Freight Payment - only for FOB, EXW, FCA */}
+            {needsFreightPayment() && (
+              <>
+                <hr className="my-2" />
+                <div className="space-y-1">
+                  <h4 className="font-medium text-sm text-gray-700">Additional Documents (Required for {newJob.incoterm || 'FOB/EXW/FCA'})</h4>
+                </div>
+                <FileUploadButton
+                  label="Freight Payment (Arrival Notice / Certificate)"
+                  file={newJob.freight_file}
+                  onSelect={handleFreightFileSelect}
+                  onClear={() => {
+                    setNewJob({ ...newJob, freight_file: null, freight_payment_path: '' });
+                    if (freightFileRef.current) freightFileRef.current.value = '';
+                  }}
+                  inputRef={freightFileRef}
+                  uploading={uploadingFreight}
+                  required
+                />
+              </>
+            )}
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isCreating}>
               Cancel
             </Button>
-            <Button onClick={handleCreateJob} disabled={isCreating} className="bg-blue-600 hover:bg-blue-700">
+            <Button
+              onClick={handleCreateJob}
+              disabled={isCreating || uploadingBL || uploadingPL || uploadingInvoice || uploadingFreight}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
               {isCreating ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -552,7 +882,7 @@ export default function JobList() {
           <DialogHeader>
             <DialogTitle>Delete Job</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete job "{deletingJob?.job_no}"? This will also delete all containers, milestones, and documents associated with this job.
+              Are you sure you want to delete job "{deletingJob?.job_no}"? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
